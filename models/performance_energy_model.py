@@ -373,8 +373,8 @@ class ModelManager:
 
         data = (
             mes.set_index(['Timestamp', 'Machine_ID'])
-            .join(scada.set_index(['Timestamp', 'Machine_ID']), how='outer')
-            .join(iot.set_index(['Timestamp', 'Machine_ID']), how='outer')
+            .join(scada.set_index(['Timestamp', 'Machine_ID']), how='left')
+            .join(iot.set_index(['Timestamp', 'Machine_ID']), how='left')
             .reset_index()
         )
         data.ffill(inplace=True)
