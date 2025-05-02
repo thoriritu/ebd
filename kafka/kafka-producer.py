@@ -59,9 +59,9 @@ def main():
 
     # Create and start threads for each stream
     threads = [
-        threading.Thread(target=stream_data, args=(producer, iot_df[:14400], IOT_TOPIC, 10)),            # run till 144000 for 24th EOD
-        threading.Thread(target=stream_data, args=(producer, scada_df[:9600], SCADA_TOPIC, 30)),    # run till 9600 for 24th EOD
-        threading.Thread(target=stream_data, args=(producer, mes_df[:2400], MES_TOPIC, 60)),        # run till 2400 for 24th EOD
+        threading.Thread(target=stream_data, args=(producer, iot_df[:144], IOT_TOPIC, 10)),            # run till 144000 for 24th EOD
+        threading.Thread(target=stream_data, args=(producer, scada_df[:96], SCADA_TOPIC, 30)),    # run till 9600 for 24th EOD
+        threading.Thread(target=stream_data, args=(producer, mes_df[:24], MES_TOPIC, 60)),        # run till 2400 for 24th EOD
     ]
 
     for t in threads:
