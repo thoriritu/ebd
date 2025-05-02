@@ -1,28 +1,3 @@
-# import json
-# from kafka3 import KafkaProducer
-# import time
-#
-# def create_producer(broker_url):
-#     """Create and configure a Kafka producer."""
-#     producer = KafkaProducer(bootstrap_servers=[broker_url])
-#     return producer
-# def send_messages(producer, topic, messages):
-#     """Send messages to a Kafka topic."""
-#     for message in messages:
-#         producer.send(topic, json.dumps(message).encode('utf-8')) # messages must be bytes
-#         time.sleep(1) # Simulate time between sends
-#     producer.flush()
-#
-# # Kafka broker URL
-# broker = 'localhost:9092'
-# topic = 'my-topic'
-# messages = [{"Machine_ID":"Machine_1", "Timestamp":"2024-01-15 00:00:00", "Temperature_C":77.81,"Vibration_mm_s":1.99,"Pressure_bar":5.90}]
-#
-# if __name__ == "__main__":
-#     producer = create_producer(broker)
-#     send_messages(producer, topic, messages)
-
-
 import json
 import time
 import threading
@@ -78,27 +53,26 @@ def main():
     # Load and prepare each dataset
     iot_df = load_and_prepare(IOT_CSV, 'Timestamp')
     scada_df = load_and_prepare(SCADA_CSV, 'Timestamp')
-    mes_df = load_and_prepare(MES_CSV, 'Timestamp')
     scada_df['Alarm_Code'] = scada_df['Alarm_Code'].replace('None', '')
+
+    mes_df = load_and_prepare(MES_CSV, 'Timestamp')
 
     # Create and start threads for each stream
     threads = [
-        threading.Thread(target=stream_data, args=(producer, iot_df, IOT_TOPIC, 10)),            # every 1 minute
-        threading.Thread(target=stream_data, args=(producer, scada_df, SCADA_TOPIC, 30)),    # every 15 minutes
-        threading.Thread(target=stream_data, args=(producer, mes_df, MES_TOPIC, 60)),        # every 60 minutes
+        threading.Thread(target=stream_data, args=(producer, iot_df[:14400], IOT_TOPIC, 10)),            # run till 144000 for 24th EOD
+        threading.Thread(target=stream_data, args=(producer, scada_df[:9600], SCADA_TOPIC, 30)),    # run till 9600 for 24th EOD
+        threading.Thread(target=stream_data, args=(producer, mes_df[:2400], MES_TOPIC, 60)),        # run till 2400 for 24th EOD
     ]
 
     for t in threads:
-        t.daemon = True
         t.start()
 
-    # Keep main thread alive
-    try:
-        while True:
-            time.sleep(1)
-    except KeyboardInterrupt:
-        print('Shutting down.')
-        producer.close()
+    for t in threads:
+        t.join()
+
+        # Cleanup
+    print('All threads finished. Closing producer.')
+    producer.close()
 
 
 if __name__ == '__main__':

@@ -27,7 +27,7 @@ from sklearn.metrics import (
 from sklearn.model_selection import TimeSeriesSplit
 
 # Constants
-MODEL_DIR = '../stored-models/performance-energy'
+MODEL_DIR = 'stored-models/performance-energy'
 os.makedirs(MODEL_DIR, exist_ok=True)
 
 # Model paths
