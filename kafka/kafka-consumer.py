@@ -13,7 +13,7 @@ def create_consumer(broker_url: str, topics: list) -> KafkaConsumer:
     consumer = KafkaConsumer(
         *topics,
         bootstrap_servers=[broker_url],
-        auto_offset_reset='earliest',  # start from beginning
+        auto_offset_reset='latest',  # start from beginning
         enable_auto_commit=True,
         group_id='my-consumer-group',
         value_deserializer=lambda m: json.loads(m.decode('utf-8'))
