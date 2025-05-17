@@ -6,6 +6,7 @@ import joblib
 import pickle
 import pandas as pd
 import numpy as np
+from matplotlib.patches import Ellipse
 from sklearn.cluster import KMeans, DBSCAN
 from sklearn.preprocessing import StandardScaler, LabelEncoder
 from kafka import KafkaConsumer
@@ -15,20 +16,32 @@ from pydantic import BaseModel
 from typing import List, Dict, Optional
 from fastapi import HTTPException
 import numpy as np
+import matplotlib.pyplot as plt
+from mpl_toolkits.mplot3d import Axes3D
+import seaborn as sns
 from fastapi.encoders import jsonable_encoder
+from scipy.spatial import ConvexHull
 from sklearn.metrics import (
     silhouette_score,
     calinski_harabasz_score,
     davies_bouldin_score,
     mean_absolute_error,
     mean_squared_error,
-    r2_score
+    r2_score, silhouette_samples
 )
 from sklearn.model_selection import TimeSeriesSplit
+from sklearn.cluster import SpectralClustering, AgglomerativeClustering
+from sklearn.manifold import TSNE
 
 # Constants
 MODEL_DIR = 'stored-models/performance-energy'
 os.makedirs(MODEL_DIR, exist_ok=True)
+
+# Constants
+MODEL_DIR = 'stored-models/performance-energy'
+VISUALIZATION_DIR = os.path.join(MODEL_DIR, 'visualizations')  # Add this line
+os.makedirs(MODEL_DIR, exist_ok=True)
+os.makedirs(VISUALIZATION_DIR, exist_ok=True)  # Add this line
 
 # Model paths
 PATHS = {
@@ -420,6 +433,11 @@ class ModelManager:
         }
         joblib.dump(model_data, PATHS['performance'])
 
+        # Generate visualization
+        self.plot_performance_clusters()
+        self.plot_performance_clusters_enhanced()
+        self.plot_enhanced_performance_clusters()
+
         # Update validation metrics
         self.validation_metrics['performance_cluster'] = {
             'training': training_metrics,
@@ -428,38 +446,41 @@ class ModelManager:
 
         return self.performance_clf
 
-    def _train_energy_model(self):
-        """Train the energy clustering model with validation"""
-        data = self._load_and_merge_data()
-        X = self.scaler.transform(data[FEATURES['energy']].values)
-
-        # Train model
-        self.energy_clf = DBSCAN(eps=0.5, min_samples=5)
-        labels = self.energy_clf.fit_predict(X)
-
-        # Evaluate clustering
-        training_metrics = {
-            "silhouette": silhouette_score(X, labels) if len(set(labels)) > 1 else None,
-            "calinski_harabasz": calinski_harabasz_score(X, labels) if len(set(labels)) > 1 else None,
-            "davies_bouldin": davies_bouldin_score(X, labels) if len(set(labels)) > 1 else None,
-            "anomaly_percentage": np.mean(np.array(labels) == -1),
-            "cluster_distribution": dict(zip(*np.unique(labels, return_counts=True)))
-        }
-
-        # Store both model and metrics
-        model_data = {
-            'model': self.energy_clf,
-            'training_metrics': training_metrics
-        }
-        joblib.dump(model_data, PATHS['energy'])
-
-        # Update validation metrics
-        self.validation_metrics['energy_cluster'] = {
-            'training': training_metrics,
-            'current': training_metrics  # Initially current = training
-        }
-
-        return self.energy_clf
+    # def _train_energy_model(self):
+    #     """Train the energy clustering model with validation"""
+    #     data = self._load_and_merge_data()
+    #     X = self.scaler.transform(data[FEATURES['energy']].values)
+    #
+    #     # Train model
+    #     self.energy_clf = DBSCAN(eps=0.5, min_samples=5)
+    #     labels = self.energy_clf.fit_predict(X)
+    #
+    #     # Evaluate clustering
+    #     training_metrics = {
+    #         "silhouette": silhouette_score(X, labels) if len(set(labels)) > 1 else None,
+    #         "calinski_harabasz": calinski_harabasz_score(X, labels) if len(set(labels)) > 1 else None,
+    #         "davies_bouldin": davies_bouldin_score(X, labels) if len(set(labels)) > 1 else None,
+    #         "anomaly_percentage": np.mean(np.array(labels) == -1),
+    #         "cluster_distribution": dict(zip(*np.unique(labels, return_counts=True)))
+    #     }
+    #
+    #     # Store both model and metrics
+    #     model_data = {
+    #         'model': self.energy_clf,
+    #         'training_metrics': training_metrics
+    #     }
+    #     joblib.dump(model_data, PATHS['energy'])
+    #
+    #     # Generate visualization
+    #     self.plot_energy_clusters()
+    #
+    #     # Update validation metrics
+    #     self.validation_metrics['energy_cluster'] = {
+    #         'training': training_metrics,
+    #         'current': training_metrics  # Initially current = training
+    #     }
+    #
+    #     return self.energy_clf
 
     def _train_energy_model(self):
         """Train the energy clustering model"""
@@ -488,6 +509,10 @@ class ModelManager:
             'model': self.energy_clf,
             'training_metrics': training_metrics
         }, PATHS['energy'])
+
+        # Generate visualization
+        self.plot_energy_clusters()
+        self.plot_energy_clusters_enhanced()
 
         self.validation_metrics['energy_cluster']['training'] = training_metrics
         self.validation_metrics['energy_cluster']['current'] = training_metrics  # Initial current = training
@@ -656,6 +681,343 @@ class ModelManager:
         with open(PATHS['state'], 'wb') as f:
             pickle.dump(self.state, f)
         print("Persisted state.")
+
+    def plot_performance_clusters(self):
+        """Visualize and save performance clusters with current data"""
+        try:
+            data = self._load_and_merge_data()
+            X = data[FEATURES['performance']].values
+            labels = self.performance_clf.predict(X)
+
+            plt.figure(figsize=(12, 8))
+
+            # 3D plot if we have 3 features
+            if X.shape[1] == 3:
+                ax = plt.axes(projection='3d')
+                scatter = ax.scatter(X[:, 0], X[:, 1], X[:, 2], c=labels, cmap='viridis', s=50)
+                ax.set_xlabel(FEATURES['performance'][0])
+                ax.set_ylabel(FEATURES['performance'][1])
+                ax.set_zlabel(FEATURES['performance'][2])
+                plt.title('Performance Clusters (3D)')
+            else:
+                # 2D plot if fewer features
+                scatter = plt.scatter(X[:, 0], X[:, 1], c=labels, cmap='viridis', s=50)
+                plt.xlabel(FEATURES['performance'][0])
+                plt.ylabel(FEATURES['performance'][1])
+                plt.title('Performance Clusters')
+
+            plt.colorbar(scatter, label='Cluster')
+            plt.tight_layout()
+
+            # Save with timestamp
+            timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+            plot_path = os.path.join(VISUALIZATION_DIR, f'performance_clusters_{timestamp}.png')
+            plt.savefig(plot_path)
+            plt.close()
+            print(f"Performance clusters plot saved to {plot_path}")
+
+            return plot_path
+
+        except Exception as e:
+            print(f"Error plotting performance clusters: {str(e)}")
+            return None
+
+    def plot_energy_clusters(self):
+        """Visualize and save energy clusters with current data"""
+        try:
+            data = self._load_and_merge_data()
+            X = self.scaler.transform(data[FEATURES['energy']].values)
+            labels = self.energy_clf.fit_predict(X)
+
+            plt.figure(figsize=(12, 8))
+
+            # 3D plot if we have 3 features
+            if X.shape[1] == 3:
+                ax = plt.axes(projection='3d')
+                scatter = ax.scatter(X[:, 0], X[:, 1], X[:, 2], c=labels, cmap='viridis', s=50)
+                ax.set_xlabel(FEATURES['energy'][0])
+                ax.set_ylabel(FEATURES['energy'][1])
+                ax.set_zlabel(FEATURES['energy'][2])
+                plt.title('Energy Clusters (3D)')
+            else:
+                # 2D plot if fewer features
+                scatter = plt.scatter(X[:, 0], X[:, 1], c=labels, cmap='viridis', s=50)
+                plt.xlabel(FEATURES['energy'][0])
+                plt.ylabel(FEATURES['energy'][1])
+                plt.title('Energy Clusters')
+
+            plt.colorbar(scatter, label='Cluster')
+            plt.tight_layout()
+
+            # Save with timestamp
+            timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+            plot_path = os.path.join(VISUALIZATION_DIR, f'energy_clusters_{timestamp}.png')
+            plt.savefig(plot_path)
+            plt.close()
+            print(f"Energy clusters plot saved to {plot_path}")
+
+            return plot_path
+
+        except Exception as e:
+            print(f"Error plotting energy clusters: {str(e)}")
+            return None
+
+    def plot_enhanced_performance_clusters(self):
+        """Improved cluster visualization for spread-out clusters"""
+        try:
+            data = self._load_and_merge_data()
+            X = data[FEATURES['performance']].values
+            labels = self.performance_clf.predict(X)
+            n_clusters = len(set(labels)) - (1 if -1 in labels else 0)
+            # For non-convex clusters
+            spectral = SpectralClustering(n_clusters=3).fit(X)
+
+            # For hierarchical structure
+            agg = AgglomerativeClustering(n_clusters=3).fit(X)
+            tsne = TSNE(n_components=2).fit_transform(X)
+            plt.scatter(tsne[:, 0], tsne[:, 1], c=labels)
+
+            plt.figure(figsize=(18, 6))
+
+            # Method 1: KDE Contour Plot
+            plt.subplot(1, 3, 1)
+            for cluster in np.unique(labels):
+                if cluster == -1:
+                    continue
+                points = X[labels == cluster][:, :2]
+                sns.kdeplot(x=points[:, 0], y=points[:, 1],
+                            levels=3, thresh=0.2,
+                            color=plt.cm.tab10(cluster),
+                            label=f'Cluster {cluster}')
+            plt.scatter(X[:, 0], X[:, 1], c=labels, cmap='tab10', s=30, alpha=0.6)
+            plt.title('Density Contours of Clusters')
+            plt.xlabel(FEATURES['performance'][0])
+            plt.ylabel(FEATURES['performance'][1])
+
+            # Method 2: Ellipse Fitting
+            plt.subplot(1, 3, 2)
+            for cluster in np.unique(labels):
+                if cluster == -1:
+                    continue
+                points = X[labels == cluster][:, :2]
+                if len(points) < 2:
+                    continue
+
+                # Calculate ellipse properties
+                cov = np.cov(points.T)
+                lambda_, v = np.linalg.eig(cov)
+                angle = np.degrees(np.arctan2(v[1, 0], v[0, 0]))
+                width, height = 2 * np.sqrt(lambda_)
+
+                # Draw ellipse
+                ell = Ellipse(xy=np.mean(points, axis=0),
+                              width=width, height=height,
+                              angle=angle,
+                              color=plt.cm.tab10(cluster),
+                              alpha=0.2)
+                plt.gca().add_patch(ell)
+                plt.scatter(points[:, 0], points[:, 1],
+                            color=plt.cm.tab10(cluster),
+                            s=30, label=f'Cluster {cluster}')
+            plt.title('Ellipse-Fitted Clusters')
+            plt.xlabel(FEATURES['performance'][0])
+
+            # Method 3: Silhouette Analysis
+            plt.subplot(1, 3, 3)
+            if n_clusters > 1:
+                silhouette_vals = silhouette_samples(X, labels)
+                y_lower = 10
+                for i in range(n_clusters):
+                    cluster_silhouette_vals = silhouette_vals[labels == i]
+                    cluster_silhouette_vals.sort()
+                    y_upper = y_lower + cluster_silhouette_vals.shape[0]
+                    plt.fill_betweenx(np.arange(y_lower, y_upper),
+                                      0, cluster_silhouette_vals,
+                                      facecolor=plt.cm.tab10(i), alpha=0.7)
+                    y_lower = y_upper + 10
+                plt.axvline(x=np.mean(silhouette_vals), color="red", linestyle="--")
+                plt.title('Silhouette Analysis')
+                plt.yticks([])
+            else:
+                plt.text(0.5, 0.5, "Need >1 cluster\nfor silhouette analysis",
+                         ha='center', va='center')
+                plt.axis('off')
+
+            plt.tight_layout()
+
+            # Save plot
+            timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+            plot_path = os.path.join(VISUALIZATION_DIR, f'improved_performance_clusters_{timestamp}.png')
+            plt.savefig(plot_path, dpi=300)
+            plt.close()
+
+            return plot_path
+
+        except Exception as e:
+            print(f"Error plotting clusters: {str(e)}")
+            return None
+
+    def plot_performance_clusters_enhanced(self):
+        """Clean 2D performance cluster visualization with cluster stats"""
+        try:
+            data = self._load_and_merge_data()
+            X = data[FEATURES['performance']].values
+            labels = self.performance_clf.predict(X)
+            centers = self.performance_clf.cluster_centers_
+
+            # Use first two features for 2D visualization
+            X_2d = X[:, :2]
+            centers_2d = centers[:, :2]
+
+            plt.figure(figsize=(16, 8))
+
+            # Create main plot area
+            plt.subplot(1, 2, 1)  # 1 row, 2 columns, first plot
+
+            # Create scatter plot with cluster colors
+            scatter = plt.scatter(X_2d[:, 0], X_2d[:, 1], c=labels, cmap='tab10', s=80, alpha=0.7)
+
+            # Plot cluster centers
+            plt.scatter(centers_2d[:, 0], centers_2d[:, 1], c='red', marker='X', s=200,
+                        linewidths=2, edgecolors='black', label='Cluster Centers')
+
+            # Add convex hulls around clusters
+            for cluster in np.unique(labels):
+                if cluster != -1:  # Skip noise if using DBSCAN
+                    points = X_2d[labels == cluster]
+                    if len(points) >= 3:  # Need at least 3 points for convex hull
+                        hull = ConvexHull(points)
+                        poly = plt.Polygon(points[hull.vertices], closed=True,
+                                           fill=True, alpha=0.1,
+                                           color=scatter.cmap(scatter.norm(cluster)))
+                        plt.gca().add_patch(poly)
+
+            plt.xlabel(FEATURES['performance'][0], fontsize=12)
+            plt.ylabel(FEATURES['performance'][1], fontsize=12)
+            plt.title('Performance Clusters', fontsize=14)
+            plt.grid(True, linestyle='--', alpha=0.3)
+            plt.legend()
+
+            # Create cluster distribution plot
+            plt.subplot(1, 2, 2)  # Second plot
+
+            # Calculate cluster counts
+            unique, counts = np.unique(labels, return_counts=True)
+            cluster_dist = dict(zip(unique, counts))
+
+            # Create bar plot
+            plt.bar([f"Cluster {k}" for k in cluster_dist.keys()],
+                    cluster_dist.values(),
+                    color=[scatter.cmap(scatter.norm(k)) for k in cluster_dist.keys()])
+
+            # Add count labels
+            for i, v in enumerate(cluster_dist.values()):
+                plt.text(i, v + 0.5, str(v), ha='center', fontsize=10)
+
+            plt.title('Machine Distribution by Cluster', fontsize=14)
+            plt.ylabel('Number of Machines', fontsize=12)
+            plt.xticks(rotation=45)
+            plt.grid(True, linestyle='--', alpha=0.3, axis='y')
+
+            plt.tight_layout()
+
+            # Save with timestamp
+            timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+            plot_path = os.path.join(VISUALIZATION_DIR, f'performance_2d_clusters_{timestamp}.png')
+            plt.savefig(plot_path, dpi=300)
+            plt.close()
+
+            print(f"Clean performance clusters plot saved to {plot_path}")
+            return plot_path
+
+        except Exception as e:
+            print(f"Error plotting performance clusters: {str(e)}")
+            return None
+
+    def plot_energy_clusters_enhanced(self):
+        """Clean 2D energy cluster visualization with cluster stats"""
+        try:
+            data = self._load_and_merge_data()
+            X = self.scaler.transform(data[FEATURES['energy']].values)
+            labels = self.energy_clf.fit_predict(X)
+
+            # Use first two features for 2D visualization
+            X_2d = X[:, :2]
+
+            # For DBSCAN, calculate cluster means
+            unique_labels = set(labels)
+            centers = []
+            for k in unique_labels:
+                if k != -1:  # Skip noise
+                    cluster_members = X_2d[labels == k]
+                    centers.append(cluster_members.mean(axis=0))
+
+            plt.figure(figsize=(16, 8))
+
+            # Create main plot area
+            plt.subplot(1, 2, 1)  # 1 row, 2 columns, first plot
+
+            # Create scatter plot with cluster colors
+            scatter = plt.scatter(X_2d[:, 0], X_2d[:, 1], c=labels, cmap='tab10', s=80, alpha=0.7)
+
+            # Plot cluster centers if they exist
+            if centers:
+                centers = np.array(centers)
+                plt.scatter(centers[:, 0], centers[:, 1], c='red', marker='X', s=200,
+                            linewidths=2, edgecolors='black', label='Cluster Centers')
+
+            # Add convex hulls around clusters
+            for cluster in unique_labels:
+                if cluster != -1:  # Skip noise
+                    points = X_2d[labels == cluster]
+                    if len(points) >= 3:  # Need at least 3 points for convex hull
+                        hull = ConvexHull(points)
+                        poly = plt.Polygon(points[hull.vertices], closed=True,
+                                           fill=True, alpha=0.1,
+                                           color=scatter.cmap(scatter.norm(cluster)))
+                        plt.gca().add_patch(poly)
+
+            plt.xlabel(FEATURES['energy'][0], fontsize=12)
+            plt.ylabel(FEATURES['energy'][1], fontsize=12)
+            plt.title('Energy Clusters', fontsize=14)
+            plt.grid(True, linestyle='--', alpha=0.3)
+            plt.legend()
+
+            # Create cluster distribution plot
+            plt.subplot(1, 2, 2)  # Second plot
+
+            # Calculate cluster counts (including noise as -1 if present)
+            unique, counts = np.unique(labels, return_counts=True)
+            cluster_dist = dict(zip(unique, counts))
+
+            # Create bar plot
+            plt.bar([f"Cluster {k}" if k != -1 else "Noise" for k in cluster_dist.keys()],
+                    cluster_dist.values(),
+                    color=[scatter.cmap(scatter.norm(k)) if k != -1 else 'gray' for k in cluster_dist.keys()])
+
+            # Add count labels
+            for i, v in enumerate(cluster_dist.values()):
+                plt.text(i, v + 0.5, str(v), ha='center', fontsize=10)
+
+            plt.title('Machine Distribution by Cluster', fontsize=14)
+            plt.ylabel('Number of Machines', fontsize=12)
+            plt.xticks(rotation=45)
+            plt.grid(True, linestyle='--', alpha=0.3, axis='y')
+
+            plt.tight_layout()
+
+            # Save with timestamp
+            timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+            plot_path = os.path.join(VISUALIZATION_DIR, f'energy_2d_clusters_{timestamp}.png')
+            plt.savefig(plot_path, dpi=300)
+            plt.close()
+
+            print(f"Clean energy clusters plot saved to {plot_path}")
+            return plot_path
+
+        except Exception as e:
+            print(f"Error plotting energy clusters: {str(e)}")
+            return None
 
 def convert_numpy_types(obj):
     """Recursively convert numpy types to native Python types"""
